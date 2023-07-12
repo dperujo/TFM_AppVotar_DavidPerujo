@@ -1,2 +1,5 @@
 # TFM_AppVotar_DavidPerujo
-Archivos modificados para la realización del TFM
+Estos son los archivos que se han creado para la realización del TFM
+
+Se despliegue una pipeline en Azure Pipelines usando Kubernetes.
+La aplicacion que se despliega es https://github.com/dockersamples/example-voting-app
