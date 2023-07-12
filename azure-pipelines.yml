@@ -1,0 +1,155 @@
+# Deploy to Azure Kubernetes Service
+# Build and push image to Azure Container Registry; Deploy to Azure Kubernetes Service
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- dependabot/npm_and_yarn/result/socket.io-parser-3.4.3
+
+resources:
+- repo: self
+
+variables:
+
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: '75905c30-179b-4bb3-aa1b-a1dbf0fdfb8c'
+  imageRepository: 'appvotartfm'
+  containerRegistry: 'perujopodcastcontainer.azurecr.io'
+  dockerfilePathVote: 'vote/Dockerfile'
+  dockerfilePathResult: 'result/Dockerfile'
+  dockerfilePathWorker: 'worker/Dockerfile'
+  imageVOTE: '$(containerRegistry)/$(imageRepository):vote-$(Build.BuildId)'
+  imageRESULT: '$(containerRegistry)/$(imageRepository):result-$(Build.BuildId)'
+  imageWORKER: '$(containerRegistry)/$(imageRepository):worker-$(Build.BuildId)'
+  imageREDIS: '$(containerRegistry)/$(imageRepository):redis-$(Build.BuildId)'
+  imageDB: '$(containerRegistry)/$(imageRepository):db-$(Build.BuildId)'
+
+  tag: '$(Build.BuildId)'
+  imagePullSecret: 'perujopodcastcontainer14529c6a-auth'
+
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Build and push vote image to container registry
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePathVote)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          vote-$(Build.BuildId)
+    - task: Docker@2
+      displayName: Build and push result image to container registry
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePathResult)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          result-$(Build.BuildId)
+    - task: Docker@2
+      displayName: Build and push worker image to container registry
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePathWorker)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          worker-$(Build.BuildId)
+    - upload: k8s-specifications
+      artifact: k8s-specifications
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Build
+
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    pool:
+      vmImage: $(vmImageName)
+    environment: 'AppVotarTFM-1131.default'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: KubernetesManifest@0
+            displayName: Create imagePullSecret
+            inputs:
+              action: createSecret
+              secretName: $(imagePullSecret)
+              dockerRegistryEndpoint: $(dockerRegistryServiceConnection)
+          - task: ReplaceTokens@5
+            displayName: Replace tokens in Deployment YAML
+            inputs:
+              targetFiles: '$(Pipeline.Workspace)/k8s-specifications/*.yaml'
+              encoding: 'auto'
+              tokenPattern: 'default'
+              writeBOM: true
+              actionOnMissing: 'warn'
+              keepToken: false
+              actionOnNoFiles: 'continue'
+              enableTransforms: false
+              enableRecursion: false
+              useLegacyPattern: false
+              enableTelemetry: true
+          - task: KubernetesManifest@0
+            displayName: Deploy vote image to AKS
+            inputs:
+              action: deploy
+              manifests: |
+                $(Pipeline.Workspace)/k8s-specifications/vote-service.yaml
+                $(Pipeline.Workspace)/k8s-specifications/vote-deployment.yaml
+              imagePullSecrets: |
+                $(imagePullSecret)
+              containers: |
+                $(imageVOTE)
+          - task: KubernetesManifest@0
+            displayName: Deploy result image to AKS
+            inputs:
+              action: deploy
+              manifests: |
+                $(Pipeline.Workspace)/k8s-specifications/result-service.yaml
+                $(Pipeline.Workspace)/k8s-specifications/result-deployment.yaml
+              imagePullSecrets: |
+                $(imagePullSecret)
+              containers: |
+                $(imageRESULT)
+          - task: KubernetesManifest@0
+            displayName: Deploy worker image to AKS
+            inputs:
+              action: deploy
+              manifests: |
+                $(Pipeline.Workspace)/k8s-specifications/worker-deployment.yaml
+              imagePullSecrets: |
+                $(imagePullSecret)
+              containers: |
+                $(imageWORKER)
+          - task: KubernetesManifest@0
+            displayName: Deploy redis image to AKS
+            inputs:
+              action: deploy
+              manifests: |
+                $(Pipeline.Workspace)/k8s-specifications/redis-service.yaml
+                $(Pipeline.Workspace)/k8s-specifications/redis-deployment.yaml
+              imagePullSecrets: |
+                $(imagePullSecret)
+          - task: KubernetesManifest@0
+            displayName: Deploy db image to AKS
+            inputs:
+              action: deploy
+              manifests: |
+                $(Pipeline.Workspace)/k8s-specifications/db-service.yaml
+                $(Pipeline.Workspace)/k8s-specifications/db-deployment.yaml
+              imagePullSecrets: |
+                $(imagePullSecret)
