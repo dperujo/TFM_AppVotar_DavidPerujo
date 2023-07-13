@@ -20,7 +20,11 @@ spec:
         ports:
         - containerPort: 80
           name: result
-
+        resources:
+          requests:
+            cpu: "100m"  # Establece la solicitud de CPU
+          limits:
+            cpu: "200m"  # Establece el límite máximo de CPU
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
